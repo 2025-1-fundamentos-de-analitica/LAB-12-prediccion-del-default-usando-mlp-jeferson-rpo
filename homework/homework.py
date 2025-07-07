@@ -96,3 +96,116 @@
 # {'type': 'cm_matrix', 'dataset': 'train', 'true_0': {"predicted_0": 15562, "predicte_1": 666}, 'true_1': {"predicted_0": 3333, "predicted_1": 1444}}
 # {'type': 'cm_matrix', 'dataset': 'test', 'true_0': {"predicted_0": 15562, "predicte_1": 650}, 'true_1': {"predicted_0": 2490, "predicted_1": 1420}}
 #
+def pregunta12():
+    import pickle
+    import gzip
+    import json
+    import os
+
+    import pandas as pd
+    from sklearn.pipeline import Pipeline
+    from sklearn.compose import ColumnTransformer
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+    from sklearn.decomposition import PCA
+    from sklearn.feature_selection import SelectKBest, f_classif
+    from sklearn.neural_network import MLPClassifier
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.metrics import (
+        precision_score,
+        recall_score,
+        f1_score,
+        balanced_accuracy_score,
+        confusion_matrix,
+    )
+
+    # Cargar datos
+    with open("files/grading/x_train.pkl", "rb") as f:
+        x_train = pickle.load(f)
+    with open("files/grading/y_train.pkl", "rb") as f:
+        y_train = pickle.load(f)
+    with open("files/grading/x_test.pkl", "rb") as f:
+        x_test = pickle.load(f)
+    with open("files/grading/y_test.pkl", "rb") as f:
+        y_test = pickle.load(f)
+
+    # Columnas categóricas y numéricas
+    categorical = ["SEX", "EDUCATION", "MARRIAGE"]
+    numerical = [col for col in x_train.columns if col not in categorical]
+
+    # Preprocesador con OneHotEncoder y StandardScaler
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical),
+            ("num", StandardScaler(), numerical),
+        ]
+    )
+
+    # Pipeline
+    pipeline = Pipeline([
+        ("onehot_scaler", preprocessor),
+        ("pca", PCA(n_components=None)),
+        ("selectkbest", SelectKBest(score_func=f_classif)),
+        ("mlpclassifier", MLPClassifier(max_iter=300, early_stopping=True, random_state=42)),
+    ])
+
+    # Grid de búsqueda
+    param_grid = {
+        "selectkbest__k": [15, 20, 25],
+        "mlpclassifier__hidden_layer_sizes": [(80,), (100,), (100, 50)],
+        "mlpclassifier__alpha": [0.0001, 0.001, 0.01],
+    }
+
+    model = GridSearchCV(
+        pipeline,
+        param_grid=param_grid,
+        scoring="balanced_accuracy",
+        cv=10,
+        n_jobs=-1,
+    )
+
+    model.fit(x_train, y_train)
+
+    # Guardar modelo entrenado
+    os.makedirs("files/models", exist_ok=True)
+    with gzip.open("files/models/model.pkl.gz", "wb") as f:
+        pickle.dump(model, f)
+
+    # Función para calcular métricas y matriz de confusión
+    def compute_metrics(x, y, name):
+        y_pred = model.predict(x)
+        cm = confusion_matrix(y, y_pred)
+        return [
+            {
+                "type": "metrics",
+                "dataset": name,
+                "precision": precision_score(y, y_pred),
+                "balanced_accuracy": balanced_accuracy_score(y, y_pred),
+                "recall": recall_score(y, y_pred),
+                "f1_score": f1_score(y, y_pred),
+            },
+            {
+                "type": "cm_matrix",
+                "dataset": name,
+                "true_0": {
+                    "predicted_0": int(cm[0][0]),
+                    "predicted_1": int(cm[0][1]),
+                },
+                "true_1": {
+                    "predicted_0": int(cm[1][0]),
+                    "predicted_1": int(cm[1][1]),
+                },
+            },
+        ]
+
+    # Obtener métricas en orden requerido
+    train_metrics, train_cm = compute_metrics(x_train, y_train, "train")
+    test_metrics, test_cm = compute_metrics(x_test, y_test, "test")
+    results = [train_metrics, test_metrics, train_cm, test_cm]
+
+    # Guardar métricas
+    os.makedirs("files/output", exist_ok=True)
+    with open("files/output/metrics.json", "w", encoding="utf-8") as f:
+        for entry in results:
+            json.dump(entry, f)
+            f.write("\n")
+pregunta12()
